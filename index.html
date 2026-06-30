@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Qhyd 边界多图叠加对比仿真系统 (支持图片完美导出)</title>
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#3498db">
+    <link rel="apple-touch-icon" href="icon-192.png">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="Qhyd仿真">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        *, *::before, *::after { box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 0; padding: 20px; background-color: #f4f6f9; color: #333; }
+        .wrapper { max-width: 1200px; margin: 0 auto; background: #ffffff; padding: 30px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); }
+        h2 { text-align: center; color: #2c3e50; margin-bottom: 30px; }
+        .panel { background: #fafbfc; border: 1px solid #e1e4e8; border-radius: 8px; padding: 20px; margin-bottom: 25px; }
+        .panel-title { font-size: 16px; font-weight: bold; color: #34495e; margin-bottom: 15px; border-left: 4px solid #3498db; padding-left: 10px; }
+        .form-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 15px; }
+        .control-group { display: flex; flex-direction: column; }
+        .control-group label { font-size: 13px; color: #666; margin-bottom: 6px; font-weight: 500; }
+        .control-group input, .control-group select { padding: 10px; border: 1px solid #ccd1d9; border-radius: 6px; font-size: 14px; outline: none; }
+        .control-group input:focus, .control-group select:focus { border-color: #3498db; }
+        
+        /* 交互按钮样式 */
+        .action-container { text-align: center; margin: 25px 0; display: flex; justify-content: center; gap: 15px; flex-wrap: wrap; }
+        .btn { padding: 12px 25px; font-size: 14px; font-weight: bold; border-radius: 6px; cursor: pointer; border: none; transition: background 0.2s; display: inline-flex; align-items: center; gap: 5px; }
+        .calc-btn { background-color: #3498db; color: #fff; }
+        .calc-btn:hover { background-color: #2980b9; }
+        .save-btn { background-color: #2ecc71; color: #fff; }
+        .save-btn:hover { background-color: #27ae60; }
+        .merge-btn { background-color: #9b59b6; color: #fff; }
+        .merge-btn:hover { background-color: #8e44ad; }
+        .clear-btn { background-color: #e74c3c; color: #fff; padding: 6px 15px; font-size: 13px; }
+        .clear-btn:hover { background-color: #c0392b; }
+        .export-btn { background-color: #f39c12; color: #fff; padding: 8px 18px; font-size: 13px; }
+        .export-btn:hover { background-color: #d35400; }
+
+        /* 画布与对比区布局 */
+        .main-chart-box { position: relative; height: 380px; margin-top: 10px; }
+        .workspace-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; border-left: 4px solid #2ecc71; padding-left: 10px; }
+        .workspace-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(350px, 1fr)); gap: 20px; margin-top: 15px; }
+        
+        /* 单独保存的图表卡片 */
+        .saved-card { background: #ffffff; border: 1px solid #e1e4e8; border-radius: 8px; padding: 15px; box-shadow: 0 2px 8px rgba(0,0,0,0.04); position: relative; display: flex; flex-direction: column; justify-content: space-between; }
+        .card-top { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px; }
+        .checkbox-container { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: bold; color: #2c3e50; cursor: pointer; background: #e8f8f5; padding: 4px 8px; border-radius: 4px; }
+        .checkbox-container input { width: 16px; height: 16px; cursor: pointer; }
+        .param-badge { background-color: #f8f9fa; border-left: 3px solid #16a085; padding: 8px; font-size: 12px; color: #555; line-height: 1.5; border-radius: 0 4px 4px 0; width: 100%; margin-right: 10px; }
+        .saved-chart-box { position: relative; height: 260px; width: 100%; margin: 10px 0; }
+        
+        /* 合并图表特定展示区 */
+        .merged-section { border: 2px dashed #9b59b6 !important; background: #fdfefe; display: none; }
+        .merged-chart-box { position: relative; height: 500px; margin-top: 15px; }
+
+        .author-footer { position: fixed; right: 14px; top: 10px; font-size: 15px; color: #9aa3ad; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; letter-spacing: 0.2px; user-select: none; pointer-events: none; z-index: 999; }
+    </style>
+</head>
+<body>
+
+<div class="wrapper">
+    <h2>油嘴流量理论计算可视化工具</h2>
+
+    <div class="panel">
+        <div class="panel-title">基准常数设定（未被扫描的参数将保持这些初始值）</div>
+        <div class="form-grid">
+            <div class="control-group">
+                <label>BSFC油耗 (g/kWh)</label>
+                <input type="number" id="base_M2" value="220.0" step="0.1">
+            </div>
+            <div class="control-group">
+                <label>Power功率 (kW)</label>
+                <input type="number" id="base_M3" value="129.0" step="0.1">
+            </div>
+            <div class="control-group">
+                <label>Speed转速 (rpm) [自动同步A3]</label>
+                <input type="number" id="base_M4" value="2400.0" step="1">
+            </div>
+            <div class="control-group">
+                <label>缸数</label>
+                <input type="number" id="base_M5" value="4.0" step="1">
+            </div>
+            <div class="control-group">
+                <label>CA喷油持续期 (°CA)</label>
+                <input type="number" id="base_B3" value="25.0" step="0.1">
+            </div>
+            <div class="control-group">
+                <label>RailP轨压 (bar)</label>
+                <input type="number" id="base_E3" value="1600.0" step="10">
+            </div>
+        </div>
+    </div>
+
+    <div class="panel">
+        <div class="panel-title">动态范围扫描（Sweep）配置</div>
+        <div class="form-grid">
+            <div class="control-group">
+                <label>选择扫描自变量（横坐标）</label>
+                <select id="sweep_var">
+                    <option value="M2">BSFC油耗</option>
+                    <option value="M3">Power功率</option>
+                    <option value="M4" selected>Speed转速</option>
+                    <option value="B3">CA喷油持续期</option>
+                    <option value="E3">RailP轨压</option>
+                </select>
+            </div>
+            <div class="control-group">
+                <label>扫描起始值 (Min)</label>
+                <input type="number" id="sweep_min" value="1000">
+            </div>
+            <div class="control-group">
+                <label>扫描结束值 (Max)</label>
+                <input type="number" id="sweep_max" value="4000">
+            </div>
+            <div class="control-group">
+                <label>扫描步数 (数据点数量)</label>
+                <input type="number" id="sweep_steps" value="30">
+            </div>
+        </div>
+    </div>
+
+    <div class="action-container">
+        <button class="btn calc-btn" onclick="executeSweepCalculation()">⚡ 计算并更新主图</button>
+        <button class="btn save-btn" onclick="saveCurrentToWorkspace()">📥 暂存当前图表到画布</button>
+        <button class="btn merge-btn" onclick="mergeSelectedCharts()">🧬 合并叠加所选图表进行同图对比</button>
+    </div>
+
+    <div class="panel">
+        <div class="panel-title">当前实时仿真沙盒图表</div>
+        <div class="main-chart-box">
+            <canvas id="qhydChart"></canvas>
+        </div>
+    </div>
+
+    <div class="panel merged-section" id="mergedSection">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+            <div style="font-size: 16px; font-weight: bold; color: #9b59b6; border-left: 4px solid #9b59b6; padding-left: 10px;">
+                🎛️ 同一坐标系合并叠加对比画布 (内置边界备注，可直接导出)
+            </div>
+            <button class="btn export-btn" onclick="exportMergedChart()">💾 导出合并对比图 (白色底+完整参数).png</button>
+        </div>
+        <div class="merged-chart-box">
+            <canvas id="mergedChartCanvas"></canvas>
+        </div>
+    </div>
+
+    <div class="panel" style="border-color: #2ecc71;">
+        <div class="workspace-header">
+            <div style="font-size: 16px; font-weight: bold; color: #2c3e50;">已保存的单组边界画布（勾选以进行合并）</div>
+            <button class="btn clear-btn" onclick="clearWorkspace()">清空全部缓存</button>
+        </div>
+        <div id="workspaceContainer" class="workspace-grid"></div>
+    </div>
+</div>
+
+<div class="author-footer">Author：LU Xu</div>
+
+<script>
+    // 💡 核心底层增强：注册全局白色背景补丁插件，确保任何时候调用 toBase64Image 均输出不透明纯白底色
+    Chart.register({
+        id: 'globalCanvasWhiteBackground',
+        beforeDraw: (chart) => {
+            const { ctx } = chart;
+            ctx.save();
+            ctx.globalCompositeOperation = 'destination-over'; // 将底色置于图线后层
+            ctx.fillStyle = '#FFFFFF'; // 严谨定义纯白底色
+            ctx.fillRect(0, 0, chart.width, chart.height);
+            ctx.restore();
+        }
+    });
+
+    let currentChart = null;
+    let mergedChartInstance = null;
+    let latestRunData = null; 
+    let cardCounter = 0;
+    
+    let dataWarehouse = {}; 
+    let savedChartInstances = {};
+
+    const colorPalette = [
+        '#E74C3C', '#3498DB', '#2ECC71', '#F1C40F', '#9B59B6', '#1ABC9C', '#E67E22', '#34495E'
+    ];
+
+    function calculateQhyd(M2, M3, M4, M5, B3, E3) {
+        const D3 = (M3 * M2) / (M4 * M5 * 0.02475);
+        const Qhyd = (4320 * D3) / (B3 * 0.86 * Math.sqrt(E3));
+        return Qhyd;
+    }
+
+    function executeSweepCalculation() {
+        const base = {
+            M2: parseFloat(document.getElementById('base_M2').value),
+            M3: parseFloat(document.getElementById('base_M3').value),
+            M4: parseFloat(document.getElementById('base_M4').value),
+            M5: parseFloat(document.getElementById('base_M5').value),
+            B3: parseFloat(document.getElementById('base_B3').value),
+            E3: parseFloat(document.getElementById('base_E3').value)
+        };
+
+        const sweepVar = document.getElementById('sweep_var').value;
+        const minVal = parseFloat(document.getElementById('sweep_min').value);
+        const maxVal = parseFloat(document.getElementById('sweep_max').value);
+        const steps = parseInt(document.getElementById('sweep_steps').value);
+
+        const selectElement = document.getElementById('sweep_var');
+        const sweepLabelName = selectElement.options[selectElement.selectedIndex].text;
+
+        const xValues = [];
+        const yValues = [];
+        const delta = (maxVal - minVal) / (steps - 1);
+
+        for (let i = 0; i < steps; i++) {
+            const currentX = minVal + (delta * i);
+            xValues.push(Number(currentX.toFixed(2)));
+
+            const runParams = { ...base };
+            runParams[sweepVar] = currentX;
+
+            const currentY = calculateQhyd(
+                runParams.M2, runParams.M3, runParams.M4, runParams.M5, runParams.B3, runParams.E3
+            );
+            yValues.push(Number(currentY.toFixed(2)));
+        }
+
+        latestRunData = {
+            xLabel: sweepLabelName,
+            xData: xValues,
+            yData: yValues,
+            params: { ...base },
+            sweepConfig: { varCode: sweepVar, varName: sweepLabelName, min: minVal, max: maxVal, steps: steps }
+        };
+
+        renderMainChart(sweepLabelName, xValues, yValues);
+    }
+
+    function renderMainChart(xLabel, xData, yData) {
+        const ctx = document.getElementById('qhydChart').getContext('2d');
+        if (currentChart) { currentChart.destroy(); }
+
+        currentChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: xData,
+                datasets: [{
+                    label: '当前动态流道流量值 Qhyd',
+                    data: yData,
+                    borderColor: '#3498DB',
+                    backgroundColor: 'rgba(52, 152, 219, 0.04)',
+                    borderWidth: 2,
+                    pointRadius: 2,
+                    tension: 0.1,
+                    fill: true
+                }]
+            },
+            options: { 
+                responsive: true, 
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: true, position: 'top' }
+                }
+            }
+        });
+    }
+
+    function saveCurrentToWorkspace() {
+        if (!latestRunData) return;
+
+        cardCounter++;
+        const id = cardCounter;
+        const container = document.getElementById('workspaceContainer');
+
+        const card = document.createElement('div');
+        card.className = 'saved-card';
+        card.id = `saved_card_${id}`;
+
+        const p = latestRunData.params;
+        const config = latestRunData.sweepConfig;
+        
+        // 外部网页显示用的 HTML
+        const remarkHTML = `
+            <strong>[记录 #${id}] 扫描:</strong> ${config.varName} (${config.min}~${config.max})<br>
+            <strong>边界:</strong> 油耗:${p.M2} | 功率:${p.M3} | 转速:${p.M4} | 缸数:${p.M5} | 持续期:${p.B3}° | 轨压:${p.E3}bar
+        `;
+
+        card.innerHTML = `
+            <div class="card-top">
+                <div class="param-badge">${remarkHTML}</div>
+                <label class="checkbox-container">
+                    <input type="checkbox" class="compare-selector" data-id="${id}"> 对比
+                </label>
+            </div>
+            <div class="saved-chart-box">
+                <canvas id="saved_canvas_${id}"></canvas>
+            </div>
+            <div style="text-align: right;">
+                <button class="btn export-btn" style="padding:4px 10px; font-size:11px;" onclick="exportSingleChart(${id})">💾 导出此图 (内含参数)</button>
+            </div>
+        `;
+        container.appendChild(card);
+
+        dataWarehouse[id] = JSON.parse(JSON.stringify(latestRunData));
+        
+        // 精炼版单句摘要，后续供多图叠加时的图例识别使用
+        dataWarehouse[id].summaryText = `[边界 #${id}] 油耗:${p.M2} 功率:${p.M3} 转速:${p.M4} 持续期:${p.B3}° 轨压:${p.E3}bar`;
+
+        // 💡 关键改动：将边界条件用多行数组形式直接作为 options.plugins.title.text 灌入 Canvas
+        const embeddedCanvasTitle = [
+            `Qhyd 仿真快照记录 #${id} (扫描自变量: ${config.varName})`,
+            `固定边界条件: BSFC油耗:${p.M2}g/kWh | Power功率:${p.M3}kW | 基准Speed转速:${p.M4}rpm | 缸数:${p.M5} | CA持续期:${p.B3}°CA | RailP轨压:${p.E3}bar`
+        ];
+
+        const ctx = document.getElementById(`saved_canvas_${id}`).getContext('2d');
+        savedChartInstances[id] = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: latestRunData.xData,
+                datasets: [{
+                    label: `流量值 Qhyd (记录 #${id})`,
+                    data: latestRunData.yData,
+                    borderColor: '#2ECC71',
+                    backgroundColor: 'transparent',
+                    borderWidth: 2,
+                    pointRadius: 1,
+                    tension: 0.1
+                }]
+            },
+            options: { 
+                responsive: true, 
+                maintainAspectRatio: false, 
+                plugins: { 
+                    legend: { display: true, position: 'top' },
+                    // 核心逻辑：在这里强制将文本写进像素，使得导出 PNG 后必带信息
+                    title: {
+                        display: true,
+                        text: embeddedCanvasTitle,
+                        align: 'start',
+                        color: '#2C3E50',
+                        font: { size: 10, weight: 'normal' },
+                        padding: { top: 5, bottom: 10 }
+                    }
+                }
+            }
+        });
+
+        card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+
+    function mergeSelectedCharts() {
+        const checkboxes = document.querySelectorAll('.compare-selector:checked');
+        const selectedIds = Array.from(checkboxes).map(cb => parseInt(cb.getAttribute('data-id')));
+
+        if (selectedIds.length < 2) {
+            alert("⚠️ 提示：请至少在下方的图表仓库中勾选 2 个或更多的图表再执行合并对比！");
+            return;
+        }
+
+        // 轴平衡交叉性安全审查
+        const baselineId = selectedIds[0];
+        const baseVarCode = dataWarehouse[baselineId].sweepConfig.varCode;
+        const baseLength = dataWarehouse[baselineId].xData.length;
+        const baseFirstX = dataWarehouse[baselineId].xData[0];
+        const baseLastX = dataWarehouse[baselineId].xData[baseLength - 1];
+
+        for (let i = 1; i < selectedIds.length; i++) {
+            const checkId = selectedIds[i];
+            const target = dataWarehouse[checkId];
+            if (target.sweepConfig.varCode !== baseVarCode) {
+                alert(`❌ 无法合并！[记录 #${checkId}] 的扫描自变量为 "${target.sweepConfig.varName}"，与基础图表的 "${dataWarehouse[baselineId].sweepConfig.varName}" 属于不同物理量，无法建立统一横轴！`);
+                return;
+            }
+            if (target.xData.length !== baseLength || target.xData[0] !== baseFirstX || target.xData[target.xData.length - 1] !== baseLastX) {
+                alert(`❌ 无法合并！[记录 #${checkId}] 的扫描范围或离散步数与其它勾选项不同，横向坐标轴刻度无法完全对准。`);
+                return;
+            }
+        }
+
+        const mergedSection = document.getElementById('mergedSection');
+        mergedSection.style.display = 'block';
+
+        const combinedDatasets = [];
+        // 💡 建立多行大标题文本库，存储被合并的所有边界条件
+        const embeddedMergedTitles = [
+            `Qhyd 多边界参数重叠对比图 (扫描自变量: ${dataWarehouse[baselineId].sweepConfig.varName})`,
+            `各对比曲线对应的边界参数定义分别如下：`
+        ];
+
+        selectedIds.forEach((id, index) => {
+            const record = dataWarehouse[id];
+            const color = colorPalette[index % colorPalette.length];
+
+            // 💡 优化：把详细的参数边界特征直接附加到图例的 label 名字中，这样导出图片时图例本身就极具可读性
+            combinedDatasets.push({
+                label: `曲线 #${id} -> [${record.summaryText}]`,
+                data: record.yData,
+                borderColor: color,
+                backgroundColor: 'transparent', 
+                borderWidth: 2.5,
+                pointRadius: 2,
+                tension: 0.1
+            });
+
+            // 同时也灌入大标题文字包中做双重保险
+            embeddedMergedTitles.push(`  • [曲线 #${id}]: ${record.summaryText}`);
+        });
+
+        const ctx = document.getElementById('mergedChartCanvas').getContext('2d');
+        if (mergedChartInstance) { mergedChartInstance.destroy(); }
+
+        mergedChartInstance = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: dataWarehouse[baselineId].xData, 
+                datasets: combinedDatasets
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    // 确保图例完美渲染在顶部，包含每条线的物理边界定义
+                    legend: { 
+                        display: true, 
+                        position: 'top',
+                        labels: { boxWidth: 15, font: { size: 11 } }
+                    },
+                    // 💡 关键改动：将合并图表的全部边界详情，作为副标题或标题组直接强行画入 Canvas 内部
+                    title: {
+                        display: true,
+                        text: embeddedMergedTitles,
+                        align: 'start',
+                        color: '#2C3E50',
+                        font: { size: 11, weight: 'normal', family: 'monospace' },
+                        padding: { top: 10, bottom: 15 }
+                    },
+                    tooltip: { mode: 'index', intersect: false }
+                },
+                scales: {
+                    x: { title: { display: true, text: dataWarehouse[baselineId].xLabel, font: { weight: 'bold' } } },
+                    y: { title: { display: true, text: '流量值 Qhyd', font: { weight: 'bold' } } }
+                }
+            }
+        });
+
+        mergedSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    // 完美导出多边界大图 (纯白底色 + 原生参数文字图例嵌在图内)
+    function exportMergedChart() {
+        if (!mergedChartInstance) return;
+        const imageURI = mergedChartInstance.toBase64Image();
+        const downloadLink = document.createElement('a');
+        downloadLink.href = imageURI;
+        downloadLink.download = `Qhyd_多曲线融合叠加对比报告图(白色底).png`;
+        document.body.appendChild(downloadLink);
+        downloadLink.click();
+        document.body.removeChild(downloadLink);
+    }
+
+    // 完美导出单组离散图表
+    function exportSingleChart(id) {
+        const chart = savedChartInstances[id];
+        if (!chart) return;
+        const imageURI = chart.toBase64Image();
+        const downloadLink = document.createElement('a');
+        downloadLink.href = imageURI;
+        downloadLink.download = `Qhyd_边界单图记录_#${id}(白色底).png`;
+        document.body.appendChild(downloadLink);
+        downloadLink.click();
+        document.body.removeChild(downloadLink);
+    }
+
+    function clearWorkspace() {
+        if(confirm("确定要彻底清空存储仓库以及合并对比画布吗？")) {
+            document.getElementById('workspaceContainer').innerHTML = '';
+            document.getElementById('mergedSection').style.display = 'none';
+            if(mergedChartInstance) { mergedChartInstance.destroy(); mergedChartInstance = null; }
+            dataWarehouse = {};
+            savedChartInstances = {};
+            cardCounter = 0;
+        }
+    }
+
+    window.onload = function() {
+        executeSweepCalculation();
+    };
+
+    if ('serviceWorker' in navigator) {
+        window.addEventListener('load', function() {
+            navigator.serviceWorker.register('service-worker.js').catch(function(err) {
+                console.log('Service Worker 注册失败:', err);
+            });
+        });
+    }
+</script>
+</body>
+</html>
