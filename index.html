@@ -3,13 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Qhyd 边界多图叠加对比仿真系统 (支持图片完美导出)</title>
-    <link rel="manifest" href="manifest.json">
-    <meta name="theme-color" content="#3498db">
-    <link rel="apple-touch-icon" href="icon-192.png">
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="default">
-    <meta name="apple-mobile-web-app-title" content="Qhyd仿真">
+    <title>Qhyd 计算&画图 v6</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         *, *::before, *::after { box-sizing: border-box; }
@@ -75,7 +69,7 @@
                 <input type="number" id="base_M3" value="129.0" step="0.1">
             </div>
             <div class="control-group">
-                <label>Speed转速 (rpm) [自动同步A3]</label>
+                <label>Speed转速 A3/M4 (rpm)</label>
                 <input type="number" id="base_M4" value="2400.0" step="1">
             </div>
             <div class="control-group">
@@ -91,6 +85,11 @@
                 <input type="number" id="base_E3" value="1600.0" step="10">
             </div>
         </div>
+        <div style="margin-top: 16px; display: flex; align-items: center; gap: 12px; background: #eaf4fb; border: 1px solid #aed6f1; border-radius: 6px; padding: 12px 18px;">
+            <span style="font-size: 13px; color: #5d6d7e; font-weight: 500; white-space: nowrap;">基准参数对应的 Qhyd：</span>
+            <span id="base_qhyd_display" style="font-size: 22px; font-weight: bold; color: #1a6fa8; letter-spacing: 0.5px;">—</span>
+            <span style="font-size: 13px; color: #5d6d7e;">cm³ / 100bar / 30s</span>
+        </div>
     </div>
 
     <div class="panel">
@@ -98,7 +97,7 @@
         <div class="form-grid">
             <div class="control-group">
                 <label>选择扫描自变量（横坐标）</label>
-                <select id="sweep_var">
+                <select id="sweep_var" onchange="onSweepVarChange()">
                     <option value="M2">BSFC油耗</option>
                     <option value="M3">Power功率</option>
                     <option value="M4" selected>Speed转速</option>
@@ -115,8 +114,8 @@
                 <input type="number" id="sweep_max" value="4000">
             </div>
             <div class="control-group">
-                <label>扫描步数 (数据点数量)</label>
-                <input type="number" id="sweep_steps" value="30">
+                <label>扫描步数 (数据点数量，≥2)</label>
+                <input type="number" id="sweep_steps" value="30" min="2">
             </div>
         </div>
     </div>
@@ -175,18 +174,52 @@
     let mergedChartInstance = null;
     let latestRunData = null; 
     let cardCounter = 0;
+    let isSaving = false; // [Fix D] 防止暂存按钮连击
     
     let dataWarehouse = {}; 
     let savedChartInstances = {};
+
+    // [Fix B] 各sweep变量的推荐默认范围
+    const sweepVarDefaults = {
+        M2: { min: 150, max: 350, label: 'BSFC油耗 (g/kWh) 推荐范围 150~350' },
+        M3: { min: 50,  max: 300, label: 'Power功率 (kW) 推荐范围 50~300' },
+        M4: { min: 800, max: 4500, label: 'Speed转速 (rpm) 推荐范围 800~4500' },
+        B3: { min: 10,  max: 60,  label: 'CA喷油持续期 (°CA) 推荐范围 10~60' },
+        E3: { min: 400, max: 2500, label: 'RailP轨压 (bar) 推荐范围 400~2500' }
+    };
+
+    function onSweepVarChange() {
+        const varCode = document.getElementById('sweep_var').value;
+        const preset = sweepVarDefaults[varCode];
+        if (preset) {
+            document.getElementById('sweep_min').value = preset.min;
+            document.getElementById('sweep_max').value = preset.max;
+        }
+    }
 
     const colorPalette = [
         '#E74C3C', '#3498DB', '#2ECC71', '#F1C40F', '#9B59B6', '#1ABC9C', '#E67E22', '#34495E'
     ];
 
+    /**
+     * 完整复现 XLS "Calc. Tool" 的计算链：
+     *   C3 [s]  = B3[°CA] / (A3[rpm] × 6)            ← 喷射持续时间
+     *   D3 [m³] = M2×M3 / (M4×M5×0.02475) × 1e-9    ← 每次喷油体积
+     *   I3      = D3 / (0.86 × √(E3×1e5) × C3)       ← 流量系数 c  [m³/s/Pa^0.5]
+     *   G3 [cm³]= 30 × I3 × √(100×1e5) × 1e6         ← Qhyd (Bernoulli)
+     *
+     * 注：A3（左侧行转速）= M4（右侧工况转速），代入后 M4 在分子分母消掉，
+     *     Qhyd 最终与转速 M4 无关，正确化简式为：
+     *     Qhyd = 72.7273 × M2 × M3 / (M5 × B3 × 0.86 × √E3)
+     *     这里保留逐步写法，便于对照 XLS 核查。
+     */
     function calculateQhyd(M2, M3, M4, M5, B3, E3) {
-        const D3 = (M3 * M2) / (M4 * M5 * 0.02475);
-        const Qhyd = (4320 * D3) / (B3 * 0.86 * Math.sqrt(E3));
-        return Qhyd;
+        const C3_s  = B3 / (M4 * 6);                        // 喷射时间 [s]
+        const D3_m3 = (M2 * M3) / (M4 * M5 * 0.02475) * 1e-9; // 每次喷油量 [m³]
+        const E3_Pa = E3 * 1e5;                              // 轨压换算 bar→Pa
+        const I3    = D3_m3 / (0.86 * Math.sqrt(E3_Pa) * C3_s); // 流量系数 c
+        const G3    = 30 * I3 * Math.sqrt(100e5) * 1e6;     // Qhyd [cm³/100bar/30s]
+        return G3;
     }
 
     function executeSweepCalculation() {
@@ -206,6 +239,17 @@
 
         const selectElement = document.getElementById('sweep_var');
         const sweepLabelName = selectElement.options[selectElement.selectedIndex].text;
+
+        // [Fix A] 步数至少为2，避免steps=1时 delta=Infinity 导致所有x值为NaN
+        if (steps < 2) {
+            alert('⚠️ 扫描步数（数据点数量）至少需要 2，已自动修正为 2。');
+            document.getElementById('sweep_steps').value = 2;
+            steps = 2;
+        }
+        if (minVal >= maxVal) {
+            alert('⚠️ 扫描起始值必须小于结束值，请检查输入。');
+            return;
+        }
 
         const xValues = [];
         const yValues = [];
@@ -266,6 +310,10 @@
 
     function saveCurrentToWorkspace() {
         if (!latestRunData) return;
+        // [Fix D] 防止连击保存重复数据
+        if (isSaving) return;
+        isSaving = true;
+        setTimeout(() => { isSaving = false; }, 800);
 
         cardCounter++;
         const id = cardCounter;
@@ -302,8 +350,15 @@
 
         dataWarehouse[id] = JSON.parse(JSON.stringify(latestRunData));
         
-        // 精炼版单句摘要，后续供多图叠加时的图例识别使用
-        dataWarehouse[id].summaryText = `[边界 #${id}] 油耗:${p.M2} 功率:${p.M3} 转速:${p.M4} 持续期:${p.B3}° 轨压:${p.E3}bar`;
+        // [Fix E] summaryText 对被扫描的变量显示sweep范围，而非基准值（避免误解）
+        const sweepRangeStr = `${config.varName}:[${config.min}~${config.max},${config.steps}pts]`;
+        const fixedParams = [];
+        if (config.varCode !== 'M2') fixedParams.push(`油耗:${p.M2}`);
+        if (config.varCode !== 'M3') fixedParams.push(`功率:${p.M3}`);
+        if (config.varCode !== 'M4') fixedParams.push(`转速:${p.M4}`);
+        if (config.varCode !== 'B3') fixedParams.push(`持续期:${p.B3}°`);
+        if (config.varCode !== 'E3') fixedParams.push(`轨压:${p.E3}bar`);
+        dataWarehouse[id].summaryText = `[边界 #${id}] 扫描: ${sweepRangeStr} | 固定: ${fixedParams.join(' ')}`;
 
         // 💡 关键改动：将边界条件用多行数组形式直接作为 options.plugins.title.text 灌入 Canvas
         const embeddedCanvasTitle = [
@@ -370,8 +425,14 @@
                 alert(`❌ 无法合并！[记录 #${checkId}] 的扫描自变量为 "${target.sweepConfig.varName}"，与基础图表的 "${dataWarehouse[baselineId].sweepConfig.varName}" 属于不同物理量，无法建立统一横轴！`);
                 return;
             }
-            if (target.xData.length !== baseLength || target.xData[0] !== baseFirstX || target.xData[target.xData.length - 1] !== baseLastX) {
-                alert(`❌ 无法合并！[记录 #${checkId}] 的扫描范围或离散步数与其它勾选项不同，横向坐标轴刻度无法完全对准。`);
+            // [Fix C] 用近似比较代替严格 !== 避免浮点精度误判
+            const eps = 1e-6;
+            const targetLastX = target.xData[target.xData.length - 1];
+            if (target.xData.length !== baseLength ||
+                Math.abs(target.xData[0] - baseFirstX) > eps ||
+                Math.abs(targetLastX - baseLastX) > eps) {
+                alert(`❌ 无法合并！[记录 #${checkId}] 的扫描范围或离散步数与其它勾选项不同，横向坐标轴刻度无法完全对准。\n` +
+                      `(当前: ${target.xData[0]}~${targetLastX}, ${target.xData.length}点  vs  基准: ${baseFirstX}~${baseLastX}, ${baseLength}点)`);
                 return;
             }
         }
@@ -481,17 +542,30 @@
         }
     }
 
+    function updateBaseQhyd() {
+        const M2 = parseFloat(document.getElementById('base_M2').value);
+        const M3 = parseFloat(document.getElementById('base_M3').value);
+        const M4 = parseFloat(document.getElementById('base_M4').value);
+        const M5 = parseFloat(document.getElementById('base_M5').value);
+        const B3 = parseFloat(document.getElementById('base_B3').value);
+        const E3 = parseFloat(document.getElementById('base_E3').value);
+        const el = document.getElementById('base_qhyd_display');
+        if ([M2, M3, M4, M5, B3, E3].some(isNaN) || M4 <= 0 || M5 <= 0 || B3 <= 0 || E3 <= 0) {
+            el.textContent = '—';
+            return;
+        }
+        const q = calculateQhyd(M2, M3, M4, M5, B3, E3);
+        el.textContent = isFinite(q) ? q.toFixed(2) : '—';
+    }
+
     window.onload = function() {
+        // 为所有基准输入绑定实时更新
+        ['base_M2','base_M3','base_M4','base_M5','base_B3','base_E3'].forEach(id => {
+            document.getElementById(id).addEventListener('input', updateBaseQhyd);
+        });
+        updateBaseQhyd();
         executeSweepCalculation();
     };
-
-    if ('serviceWorker' in navigator) {
-        window.addEventListener('load', function() {
-            navigator.serviceWorker.register('service-worker.js').catch(function(err) {
-                console.log('Service Worker 注册失败:', err);
-            });
-        });
-    }
 </script>
 </body>
 </html>
