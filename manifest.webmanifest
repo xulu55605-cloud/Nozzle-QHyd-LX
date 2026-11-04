@@ -1,0 +1,18 @@
+{
+  "name": "Qhyd 油嘴流量理论计算可视化工具",
+  "short_name": "Qhyd",
+  "description": "油嘴流量 Qhyd 理论计算、多边界曲线叠加对比与曲线族可视化",
+  "lang": "zh-CN",
+  "start_url": "./",
+  "scope": "./",
+  "id": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#080e1a",
+  "theme_color": "#0f1829",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
