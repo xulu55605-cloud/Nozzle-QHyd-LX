@@ -2,7 +2,7 @@
  * 策略：预缓存全部静态文件 → 缓存优先（离线可用）；后台不主动更新。
  * 发布新版本时，请把下面的 CACHE_VERSION 加一，用户下次打开会自动换上新文件。
  */
-const CACHE_VERSION = 'qhyd-v6-1';
+const CACHE_VERSION = 'qhyd-v6-2';
 
 const PRECACHE = [
   './',

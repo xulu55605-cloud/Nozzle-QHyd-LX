@@ -256,7 +256,7 @@
             </div>
             <div class="control-group wide">
                 <label>取值列表（逗号分隔，最多 8 个）</label>
-                <input type="text" id="fam_values" value="1200,1400,1600,1800">
+                <input type="text" id="fam_values" value="1400,1600,1800,2000">
             </div>
         </div>
         <div class="hint-line">横轴沿用上方"动态范围扫描"的自变量、范围与步数；族变量不能与扫描自变量相同。结果显示在下方的合并对比画布中，与基准值相同的那条曲线会加粗。</div>
@@ -453,7 +453,10 @@
             let tx = px + 12, ty = py - 34;
             if (tx + w > a.right) tx = px - 12 - w;
             if (ty < a.top) ty = py + 14;
-            drawTag(ctx, text, tx, ty, d ? 'rgba(251,191,36,0.16)' : 'rgba(230,126,34,0.12)', d ? '#fde68a' : '#a04000', col);
+            // 曲线族画布上标签可能压在多条曲线上，用不透明底色保证可读
+            const tagBg = opt.solid ? (d ? '#2b2410' : '#fdebd0')
+                                    : (d ? 'rgba(251,191,36,0.16)' : 'rgba(230,126,34,0.12)');
+            drawTag(ctx, text, tx, ty, tagBg, d ? '#fde68a' : '#a04000', col);
         }
     };
     // 6) 十字准线 + 实时读数
@@ -636,11 +639,14 @@
 
     // 基准点脉动：持续重绘主图
     function pulseLoop() {
-        const c = currentChart;
-        if (c && c.ctx && !document.hidden && c.options.plugins.baselineMarker && c.options.plugins.baselineMarker.show &&
-            (c.$reveal === undefined || c.$reveal >= 1)) {
-            c.draw();
-        }
+        // 主图与（带基准点的）曲线族画布都做脉动重绘
+        [currentChart, mergedChartInstance].forEach(c => {
+            const m = c && c.ctx && c.options && c.options.plugins && c.options.plugins.baselineMarker;
+            if (!document.hidden && m && m.show && m.pulse && !c.$exporting &&
+                (c.$reveal === undefined || c.$reveal >= 1)) {
+                c.draw();
+            }
+        });
         requestAnimationFrame(pulseLoop);
     }
 
@@ -968,7 +974,8 @@
             options: makeOptions({
                 xLabel: spec.xLabel, xMin: spec.xMin, xMax: spec.xMax,
                 titleLines: spec.titleLines, titleFont: { size: 11, weight: 'normal', family: 'monospace' },
-                legendFont: { size: 11 }, tooltip: true
+                legendFont: { size: 11 }, tooltip: true,
+                marker: spec.marker ? { show: true, x: spec.marker.x, y: spec.marker.y, pulse: true, solid: true } : { show: false }
             })
         });
         revealChart(mergedChartInstance, 1200);
@@ -1088,7 +1095,12 @@
             `Qhyd 曲线族对比：族变量 ${meta.name}（${values.join(' / ')}）`,
             `横轴扫描 ${label} [${minVal}~${maxVal}, ${steps}pts] | 固定: ${describeParams(base, [sweepVar, famVar])}`
         ];
-        buildMergedChart({ datasets, titleLines, xLabel: label, xMin: xs[0], xMax: xs[xs.length - 1] });
+        // 基准点：基准参数在扫描变量上的位置（落在扫描范围内才标记），与主图一致
+        let marker = null;
+        const bx = base[sweepVar];
+        if (bx >= minVal && bx <= maxVal) marker = { x: bx, y: Number(qOf(base).toFixed(4)) };
+
+        buildMergedChart({ datasets, titleLines, marker, xLabel: label, xMin: xs[0], xMax: xs[xs.length - 1] });
     }
 
     // ================= 导出 / 清空 =================
